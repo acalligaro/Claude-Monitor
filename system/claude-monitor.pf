@@ -1,0 +1,3 @@
+# Ancre com.apple/claude-monitor : http://claude.local (port 80) -> serveur local 127.0.0.1:8765
+# Boucle locale uniquement (lo0) : aucun effet sur les interfaces réseau.
+rdr pass on lo0 inet proto tcp from any to 127.0.0.1 port 80 -> 127.0.0.1 port 8765

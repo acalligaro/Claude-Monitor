@@ -1,0 +1,7 @@
+# Fichiers générés à l'exécution (données personnelles ou cache)
+logs/
+__pycache__/
+ratelimits.json
+limits.json
+pricing.json
+*.tmp

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Monitor</title>
+<style>
+:root { --bg:#f7f7f5; --card:#fff; --fg:#1d1d1b; --mut:#6b6b66; --line:#e3e2dd; --acc:#c96442; --ok:#2e7d4f; --run:#b7791f; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#1a1a18; --card:#242422; --fg:#ecebe6; --mut:#9a9890; --line:#3a3936; --acc:#e08a6a; --ok:#6cc08b; --run:#e8b44f; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+/* Pleine largeur. 1 col (étroit) ; 2 col ≥1000 px : Utilisation, [Simulation|Live], Sous-agents ;
+   3 col ≥1400 px : [Utilisation 2/3|Simulation], [Live|Sous-agents 2/3] ; 4 col ≥1800 px : [Util. 2|Sim|Live sur 2 rangées], [Sous-agents 3]. */
+main { padding:12px 16px 16px; display:grid; gap:12px; grid-template-columns:minmax(0,1fr); grid-auto-flow:dense; }
+@media (min-width:1000px) { main { grid-template-columns:repeat(2,minmax(0,1fr)); } .use, .sub { grid-column:1/-1; } .use { overflow-x:visible; } }
+@media (min-width:1400px) { main { grid-template-columns:repeat(3,minmax(0,1fr)); } .use, .sub { grid-column:span 2; } }
+@media (min-width:1800px) { main { grid-template-columns:repeat(4,minmax(0,1fr)); } .sub { grid-column:span 3; } .live { grid-row:span 2; } }
+header { padding:12px 16px 0; display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }
+h1 { font-size:20px; margin:0; } h2 { font-size:15px; margin:0 0 10px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; overflow-x:auto; }
+.mut { color:var(--mut); font-size:12px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
+td.wrap { white-space:normal; word-break:break-word; }
+th { color:var(--mut); font-weight:500; } td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+.tabs button { background:none; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:3px 9px; cursor:pointer; font:inherit; font-size:12px; }
+.tabs button[aria-pressed=true] { background:var(--acc); color:#fff; border-color:var(--acc); }
+.tabs { display:flex; gap:6px; margin-bottom:10px; }
+.ok { color:var(--ok); } .run { color:var(--run); font-weight:600; }
+svg text { fill:var(--mut); font-size:10px; } svg rect { fill:var(--acc); }
+#dot { font-weight:600; } #dot.on { color:var(--ok); } #dot.off { color:var(--run); }
+#feed { list-style:none; margin:0; padding:0; max-height:420px; overflow-y:auto; font-size:13px; }
+.live { display:flex; flex-direction:column; } .live #feed { flex:1 1 0; max-height:none; min-height:320px; } /* le flux remplit la hauteur de la rangée */
+#feed li { display:flex; gap:8px; align-items:baseline; padding:5px 6px; border-bottom:1px solid var(--line); }
+#feed li.new { animation:flash 2s ease-out; }
+@keyframes flash { from { background:color-mix(in srgb, var(--acc) 35%, transparent); } to { background:transparent; } }
+.badge { border:1px solid var(--line); border-radius:999px; padding:0 8px; font-size:11px; white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis; }
+.badge.main { background:var(--acc); color:#fff; border-color:var(--acc); }
+#feed .lbl { flex:1; word-break:break-word; } #feed .t { color:var(--mut); font-variant-numeric:tabular-nums; } #feed .sid { color:var(--mut); font-size:11px; font-family:ui-monospace,monospace; }
+.sim td { vertical-align:top; white-space:normal; width:45%; } .sim td:first-child { width:10%; white-space:nowrap; }
+.pct { font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
+.track { height:6px; border-radius:3px; background:var(--line); overflow:hidden; margin:3px 0; }
+.fill { height:100%; } .lv0 { background:var(--ok); } .lv1 { background:var(--run); } .lv2 { background:#d64545; }
+.warn { font-size:12px; color:var(--run); margin:8px 0; }
+details { margin-top:8px; font-size:12px; } summary { cursor:pointer; color:var(--mut); }
+.bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<header><h1>Claude Code : utilisation et agents</h1><span><span id="dot" class="off">● connexion…</span> <span class="mut" id="stamp"></span></span></header>
+<main>
+  <section class="use">
+    <h2>Utilisation (tokens)</h2>
+    <div class="tabs" role="group" aria-label="Période">
+      <button data-w="5h">5 dernières heures</button><button data-w="today">Aujourd'hui</button><button data-w="7d">7 jours</button>
+    </div>
+    <div id="usage"></div>
+    <div id="chart" style="margin-top:12px"></div>
+  </section>
+  <section>
+    <h2>Limites réelles <span class="mut">(statusline Claude Code)</span></h2>
+    <div id="real"></div>
+    <h2 style="margin-top:16px">Simulation : Pro et Max 5x <span class="mut">(estimation)</span></h2>
+    <div id="gauges"></div>
+    <label class="mut">Mon offre <select id="plan"><option value="pro">Pro</option><option value="max5">Max 5x</option></select></label> <span class="mut" id="planmsg" role="status"></span>
+    <details><summary>Calibration automatique et hypothèses</summary>
+    <p class="warn">Anthropic ne publie aucune limite en tokens. Budgets recalculés automatiquement depuis les % réels de la statusline, en tokens pondérés (entrée ×1, sortie ×5, cache créé ×1,25, cache lu ×0,1).</p>
+    <div class="mut" id="calinfo"></div>
+    </details>
+  </section>
+  <section class="live"><div class="bar"><h2 style="margin:0">Live : agents et actions</h2><div class="tabs" style="margin:0"><button id="pause" aria-pressed="false">Pause</button></div></div><ul id="feed"></ul></section>
+  <section class="sub"><h2>Sous-agents</h2><div id="subagents"></div></section>
+</main>
+<script>
+let win = "5h", last = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = n => (n >= 1e9 ? (n/1e9).toFixed(1)+" G" : n >= 1e6 ? (n/1e6).toFixed(1)+" M" : n >= 1e3 ? (n/1e3).toFixed(0)+" k" : String(n)).replace(".", ",");
+const hm = ts => ts ? new Date(ts).toLocaleString("fr-FR", {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "";
+const table = (head, rows) => rows.length
+  ? `<table><tr>${head.map(h => `<th${h[1]?' class="n"':''}${h[2]?` title="${h[2]}"`:''}>${h[0]}</th>`).join("")}</tr>${rows.map(r => `<tr>${r.join("")}</tr>`).join("")}</table>`
+  : `<p class="mut">Rien pour l'instant.</p>`;
+const td = (v, cls="") => `<td${cls?` class="${cls}"`:""}>${v}</td>`;
+
+function gauges() {
+  const sm = last.sim; if (!sm) return;
+  const lv = v => v < 70 ? 0 : v < 90 ? 1 : 2, names = {pro: "Pro", max5: "Max 5x"};
+  const g = (title, v, sub) => `<td><div class="pct">${v.toFixed(1)} %</div>
+    <div class="track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}" aria-label="${title}"><div class="fill lv${lv(v)}" style="width:${Math.min(100, v)}%"></div></div><div class="mut">${sub}</div></td>`;
+  $("gauges").innerHTML = `<table class="sim"><tr><th></th><th>% moyen par session 5 h</th><th>% semaine (7 j glissants)</th></tr>` +
+    Object.entries(sm.plans).map(([k, p]) => `<tr><td><b>${names[k]}</b></td>` +
+      g(`${names[k]} · session 5 h (moyenne)`, p.avg, `en cours ${p.now.toFixed(1)} % · max ${p.max.toFixed(1)} % · budget ${num(p.budget_block)}`) +
+      g(`${names[k]} · semaine`, p.week, `budget ${num(p.budget_week)}`) + `</tr>`).join("") +
+    `</table><div class="mut">${sm.blocks} blocs de 5 h sur 7 j</div>`;
+  const c = sm.calibrated;
+  if (document.activeElement !== $("plan")) $("plan").value = (c && c.plan) || "max5";
+  $("calinfo").textContent = (c ? `Dernière calibration : ${hm(c.date)} (${names[c.plan]}${c.auto ? ", automatique depuis la statusline" : ""})` : "Pas encore calibré : budgets par défaut (source communautaire, voir README). La calibration se fait seule dès qu'une session dépasse 5 %.")
+    + ` · Bloc en cours : ${sm.block_now_start ? "depuis " + hm(sm.block_now_start) + ", " + num(Math.round(sm.block_now_w)) : "aucun"} · 7 j : ${num(Math.round(sm.week_w))} tokens pondérés`;
+}
+
+function real() {
+  const rl = last && last.rl, el = $("real");
+  if (!rl) { el.innerHTML = `<p class="mut">Pas encore de relevé : il arrive au prochain affichage de la statusline.</p>`; return; }
+  const t = Date.now() / 1000, d = s => new Date(s * 1000);
+  const hhmm = s => d(s).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"});
+  const day = s => d(s).toLocaleString("fr-FR", {weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
+  const left = s => { const x = Math.max(0, Math.round(s - t)), j = Math.floor(x / 86400), h = Math.floor(x % 86400 / 3600), m = Math.floor(x % 3600 / 60);
+    return x ? (j ? `${j} j ` : "") + `${h} h ${String(m).padStart(2, "0")}` : "réinitialisée"; };
+  const pct = l => l && l.used_percentage != null ? `${Math.round(l.used_percentage)} %` : "?";
+  const f = rl.five_hour || {}, w = rl.seven_day || {}, rows = [];
+  if (f.resets_at) rows.push(["Session 5 h", pct(f), hhmm(f.resets_at - 18000), hhmm(f.resets_at), left(f.resets_at)]);
+  if (w.resets_at) rows.push(["Semaine 7 j", pct(w), "", day(w.resets_at), left(w.resets_at)]);
+  const age = Math.round((t - rl.at) / 60);
+  el.innerHTML = table([["Limite"], ["Utilisé", 1], ["Début"], ["Fin / réinitialisation"], ["Restant", 1]],
+      rows.map(r => [td(`<b>${r[0]}</b>`), td(r[1], "n"), td(r[2]), td(r[3]), td(r[4], "n")])) +
+    `<div class="mut">Relevé ${age < 1 ? "à l'instant" : `il y a ${age} min`} (mis à jour quand la statusline s'affiche).</div>`;
+}
+setInterval(() => last && real(), 30000);
+
+$("plan").onchange = async ev => {
+  $("planmsg").textContent = "Enregistrement…";
+  try {
+    const r = await (await fetch("/api/plan", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({plan: ev.target.value})})).json();
+    $("planmsg").textContent = r.ok ? "Enregistré, recalibrage en cours." : "Erreur : " + r.error;
+  } catch (_) { $("planmsg").textContent = "Serveur injoignable."; }
+};
+
+function render() {
+  if (!last) return;
+  real();
+  gauges();
+  document.querySelectorAll(".tabs button[data-w]").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === win));
+  const u = last.usage[win];
+  const tot = u.reduce((a, r) => [a[0]+r.input, a[1]+r.output, a[2]+r.cache_write, a[3]+r.cache_read], [0,0,0,0]);
+  const usd = c => c == null ? `<span class="mut">prix inconnu</span>` : c.toLocaleString("fr-FR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " $";
+  const cost = u.reduce((a, r) => a + (r.cost || 0), 0), unk = u.some(r => r.cost == null);
+  const rows = u.map(r => [`<td title="${esc(r.model)}">${esc(r.model.replace(/^claude-/, ""))}</td>`, td(num(r.input),"n"), td(num(r.output),"n"), td(num(r.cache_write),"n"), td(num(r.cache_read),"n"), td(usd(r.cost),"n")]);
+  if (u.length > 1) rows.push([td("<b>Total</b>"), ...tot.map(v => td(`<b>${num(v)}</b>`, "n")), td(`<b>${usd(cost)}${unk ? "*" : ""}</b>`, "n")]);
+  const pr = last.pricing || {};
+  $("usage").innerHTML = table([["Modèle"],["Entrée",1,"Tokens d'entrée"],["Sortie",1,"Tokens de sortie"],["Cache +",1,"Cache créé (5 min et 1 h)"],["Cache lu",1,"Cache lu (hits et refresh)"],["Coût est. ($)",1,"Coût estimé ($) au tarif API public"]], rows) +
+    `<div class="mut">Estimation au tarif API public. Abonnement non facturé au token. Prix du ${pr.fetched_at ? esc(pr.fetched_at.slice(0, 10)) : "relevé en dur (secours)"}${unk ? " · * hors modèles au prix inconnu" : ""}.</div>`;
+
+  const d = last.daily, max = Math.max(1, ...d.map(x => x.total)), W = 320, H = 90, bw = W / d.length;
+  $("chart").innerHTML = `<div class="mut">Tokens totaux par jour (7 jours)</div>
+    <svg viewBox="0 0 ${W} ${H+28}" width="100%" style="max-width:480px" role="img" aria-label="Tokens par jour">
+    ${d.map((x, i) => { const h = Math.max(1, x.total / max * H); return `<rect x="${i*bw+6}" y="${H-h+12}" width="${bw-12}" height="${h}" rx="2"><title>${x.day} : ${x.total.toLocaleString("fr-FR")}</title></rect>
+      <text x="${i*bw+bw/2}" y="${H+24}" text-anchor="middle">${x.day.slice(5)}</text><text x="${i*bw+bw/2}" y="${H-h+9}" text-anchor="middle">${num(x.total)}</text>`; }).join("")}
+    </svg>`;
+
+
+  $("subagents").innerHTML = table([["Dernière activité"],["Session"],["Agent"],["Type"],["Description"],["Outils",1],["État"]],
+    last.subagents.map(a => [td(hm(a.last)), td(esc(a.session)), td(esc(a.agent)), td(esc(a.type)), td(esc(a.description), "wrap"), td(a.tools,"n"),
+      td(a.state === "en cours" ? `<span class="run">⏳ en cours</span>` : a.state === "terminé" ? `<span class="ok">terminé</span>` : `<span class="mut">${esc(a.state)}</span>`)]));
+}
+
+/* ---- Live : SSE, avec repli en interrogation toutes les 2 s ---- */
+let es = null, poll = null, paused = false, buffer = [];
+const feed = $("feed"), MAXFEED = 150;
+const now = () => new Date().toLocaleTimeString("fr-FR");
+function status(ok, txt) { $("dot").className = ok ? "on" : "off"; $("dot").textContent = ok ? "● Live" : "● " + txt; }
+function stamp(what) { $("stamp").textContent = `${what} ${now()}${last ? " · " + last.files + " fichiers suivis" : ""}`; }
+const stIcon = s => s === "en cours" ? "⏳" : (s === "ok" || s === "terminé") ? "✓" : `<span class="mut">${esc(s)}</span>`;  // ex. « sans résultat », « inactif »
+
+function feedItem(e, fresh) {
+  const id = (e.kind === "agent" ? "ag-" + e.agent : "ac-" + e.id);
+  let li = feed.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  const badge = e.kind === "agent" ? e.description || e.type : e.name;
+  const main = e.kind === "action" && e.who === "principal";
+  const t = hm(e.kind === "agent" ? e.last : e.ts);
+  const html = `<span class="t" title="${t}">${t.slice(-8)}</span><span class="st">${stIcon(e.state)}</span>
+    <span class="badge${main ? " main" : ""}" title="${esc(e.who || "sous-agent " + e.agent)}">${esc(badge)}</span><span class="sid" title="Session">${esc(e.session)}</span>
+    <span class="lbl">${e.kind === "agent" ? "<b>sous-agent</b> " + esc(e.state) : "<b>" + esc(e.tool.replace(/^mcp__/, "mcp:")) + "</b> " + esc(e.label)}</span>`;
+  if (li) { li.innerHTML = html; } else { li = document.createElement("li"); li.dataset.id = id; li.innerHTML = html; feed.prepend(li); }
+  if (fresh) { li.classList.remove("new"); void li.offsetWidth; li.classList.add("new"); }
+  while (feed.children.length > MAXFEED) feed.lastChild.remove();
+}
+
+function onEvent(e) {
+  if (e.kind === "ping") { stamp("Connexion vérifiée"); return; }
+  if (e.kind === "full") {
+    last = e.data; render(); stamp("Mise à jour reçue");
+    // Alimente aussi le flux (utile en mode interrogation) : seulement ce qui est nouveau ou a changé d'état.
+    const first = !feed.children.length;
+    [...last.subagents.map(a => ({kind: "agent", ...a})), ...last.actions.map(a => ({kind: "action", ...a}))].reverse()
+      .forEach(x => push(x, !first));
+    return;
+  }
+  push(e, true);
+}
+const seen = new Map();
+function push(e, fresh) {
+  const k = e.kind === "agent" ? "ag-" + e.agent : "ac-" + e.id;
+  if (seen.get(k) === e.state) return;
+  seen.set(k, e.state);
+  if (paused) buffer.push(e); else feedItem(e, fresh);
+}
+
+function startPolling() {
+  if (poll) return;
+  const tick = async () => {
+    try { onEvent({kind: "full", init: true, data: await (await fetch("/api/data", {cache: "no-store"})).json()}); }
+    catch (_) { status(false, "hors ligne"); }
+  };
+  tick(); poll = setInterval(tick, 2000);
+}
+function stopPolling() { clearInterval(poll); poll = null; }
+
+function connect() {
+  if (!window.EventSource) { status(false, "interrogation 2 s"); startPolling(); return; }
+  es = new EventSource("/api/live");
+  es.onopen = () => { status(true); stopPolling(); };
+  es.onmessage = m => { status(true); try { onEvent(JSON.parse(m.data)); } catch (err) { console.error(err); } };
+  es.onerror = () => {
+    status(false, "reconnexion…"); startPolling();           // repli immédiat
+    if (es.readyState === EventSource.CLOSED) setTimeout(connect, 3000);  // ex. 503 : le navigateur ne réessaie pas seul
+  };
+}
+$("pause").onclick = () => {
+  paused = !paused; $("pause").setAttribute("aria-pressed", paused); $("pause").textContent = paused ? `Reprendre` : "Pause";
+  if (!paused) { buffer.forEach(e => feedItem(e, true)); buffer = []; }
+};
+document.querySelectorAll(".tabs button[data-w]").forEach(b => b.onclick = () => { win = b.dataset.w; render(); });
+connect();
+</script>
+</body>
+</html>
