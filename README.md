@@ -98,3 +98,7 @@ Tu peux aussi modifier `limits.json` à la main. Il est relu à chaque cycle.
 CLAUDE_MONITOR_PORT=8766 python3 ~/claude-monitor/server.py   # instance de test sur un autre port
 python3 ~/claude-monitor/test_server.py                        # affiche OK, OK incrémental, OK simulation
 ```
+
+## Licence
+
+[PolyForm Noncommercial 1.0.0](LICENSE) : copie, modification et partage gratuits autorisés pour tout usage non commercial, à condition de conserver la ligne « Required Notice » (nom de l'auteur et source). Tout usage commercial demande un accord écrit.
