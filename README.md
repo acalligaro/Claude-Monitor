@@ -1,5 +1,7 @@
 # Claude Monitor
 
+*Tableau de bord local de l'utilisation de Claude Code* · [English version](README.en.md)
+
 Tableau de bord local, en lecture seule sur `~/.claude/projects` et limité à la bibliothèque standard Python. Il affiche :
 
 - les tokens par modèle, avec un coût estimé au tarif API public (`pricing.json`, relu depuis https://docs.claude.com/en/docs/about-claude/pricing.md au plus 1 fois par 24 h ; table de secours en dur si la page est injoignable, « prix inconnu » si le modèle n'y figure pas). Seul appel sortant du serveur ;
@@ -98,6 +100,8 @@ Tu peux aussi modifier `limits.json` à la main. Il est relu à chaque cycle.
 CLAUDE_MONITOR_PORT=8766 python3 ~/claude-monitor/server.py   # instance de test sur un autre port
 python3 ~/claude-monitor/test_server.py                        # affiche OK, OK incrémental, OK simulation
 ```
+
+Détails d'architecture : [architecture.md](architecture.md).
 
 ## Licence
 
